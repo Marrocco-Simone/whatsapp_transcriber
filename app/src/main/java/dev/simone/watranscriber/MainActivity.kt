@@ -6,19 +6,19 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.simone.watranscriber.ui.MainScreen
 import dev.simone.watranscriber.ui.MainViewModel
 
 class MainActivity : ComponentActivity() {
 
-    private var viewModel: MainViewModel? = null
+    private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,10 +32,8 @@ class MainActivity : ComponentActivity() {
                 dynamicLightColorScheme(context)
             }
             MaterialTheme(colorScheme = colors) {
-                val model: MainViewModel = viewModel()
-                viewModel = model
                 MainScreen(
-                    viewModel = model,
+                    viewModel = viewModel,
                     onOpenStorageSettings = ::openStorageSettings,
                     onOpenNotificationSettings = ::openNotificationSettings,
                 )
@@ -45,12 +43,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        viewModel?.refresh()
+        viewModel.refresh()
     }
 
     override fun onStop() {
         super.onStop()
-        viewModel?.releaseModel()
+        viewModel.releaseModel()
     }
 
     private fun openStorageSettings() {

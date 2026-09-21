@@ -3,6 +3,7 @@ package dev.simone.watranscriber.audio
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.AudioFormat
 import android.media.MediaMetadataRetriever
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -36,6 +37,7 @@ object AudioDecoder {
 
         var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
         val pcm = ByteArrayOutputStream()
         val bufferInfo = MediaCodec.BufferInfo()
         var inputDone = false
@@ -65,6 +67,9 @@ object AudioDecoder {
                         val format = codec.outputFormat
                         sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            pcmEncoding = format.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                        }
                     }
                     MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
                     else -> {
@@ -88,7 +93,7 @@ object AudioDecoder {
             extractor.release()
         }
 
-        return resample(toMonoFloat(pcm.toByteArray(), channels), sampleRate)
+        return resample(toMonoFloat(pcm.toByteArray(), channels, pcmEncoding), sampleRate)
     }
 
     fun durationMillis(path: String): Long? {
@@ -103,14 +108,27 @@ object AudioDecoder {
         }
     }
 
-    private fun toMonoFloat(bytes: ByteArray, channels: Int): FloatArray {
-        val shorts = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        val frames = shorts.limit() / channels
+    /** Most decoders return 16 bit samples, a few return floats. */
+    private fun toMonoFloat(bytes: ByteArray, channels: Int, pcmEncoding: Int): FloatArray {
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        return when (pcmEncoding) {
+            AudioFormat.ENCODING_PCM_FLOAT -> {
+                val floats = buffer.asFloatBuffer()
+                downmix(floats.limit() / channels, channels) { floats.get(it) }
+            }
+            else -> {
+                val shorts = buffer.asShortBuffer()
+                downmix(shorts.limit() / channels, channels) { shorts.get(it) / 32768f }
+            }
+        }
+    }
+
+    private inline fun downmix(frames: Int, channels: Int, sample: (Int) -> Float): FloatArray {
         val mono = FloatArray(frames)
         for (frame in 0 until frames) {
             var sum = 0f
             for (channel in 0 until channels) {
-                sum += shorts.get(frame * channels + channel) / 32768f
+                sum += sample(frame * channels + channel)
             }
             mono[frame] = sum / channels
         }
