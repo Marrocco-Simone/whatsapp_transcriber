@@ -84,6 +84,13 @@ submodule, installs NDK 27.1.12297006 and CMake 3.22.1, runs `assembleDebug` and
 To install a build from the phone, open the run in the Actions tab and download that
 artifact.
 
+The workflow builds the same code with the same flags as a local build, so the app
+behaves the same. It differs in one way: a runner has no debug keystore, so it makes a
+new one for each run. Android refuses to install an APK over an app that carries a
+different signature. So a second APK from Actions needs an uninstall first, and an
+uninstall deletes the transcriptions and the model. A build from your own machine always
+carries the same key, and installs over the previous one.
+
 ## Install
 
 ```sh
