@@ -10,6 +10,8 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out the repository and whisper.cpp
         uses: actions/checkout@v7
@@ -42,9 +44,35 @@ jobs:
       - name: Run lint
         run: ./gradlew :app:lintDebug --no-daemon
 
-      - name: Upload the APK
+      - name: Read the version name
+        id: version
+        run: |
+          VERSION=$(grep 'versionName = ' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Name the APK after the version
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "whatsapp-transcriber-v${{ steps.version.outputs.version }}.apk"
+
+      - name: Upload the APK as an artifact
         uses: actions/upload-artifact@v7
         with:
           name: app-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: whatsapp-transcriber-v${{ steps.version.outputs.version }}.apk
           if-no-files-found: error
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          APK="whatsapp-transcriber-${TAG}.apk"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK" \
+              --title "$TAG" \
+              --notes "Debug APK for arm64, built from ${GITHUB_SHA}."
+          fi
