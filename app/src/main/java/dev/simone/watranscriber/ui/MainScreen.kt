@@ -262,6 +262,14 @@ private fun AudioCard(
                 } else {
                     Text(item.transcript, style = MaterialTheme.typography.bodyLarge)
                 }
+                item.tookMillis?.let { took ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "transcribed in ${formatElapsed(took)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

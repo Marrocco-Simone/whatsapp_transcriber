@@ -21,3 +21,8 @@ fun formatDuration(millis: Long): String {
     val seconds = millis / 1000
     return "%d:%02d".format(seconds / 60, seconds % 60)
 }
+
+fun formatElapsed(millis: Long): String {
+    val seconds = (millis + 500) / 1000
+    return if (seconds < 60) "$seconds s" else "${seconds / 60} min ${seconds % 60} s"
+}

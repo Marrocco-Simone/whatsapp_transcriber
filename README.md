@@ -14,6 +14,7 @@ The app is for personal use. It is not on any store. You install it with `adb`.
    shows how far whisper is.
 4. The text then stays under the card, and the app shows it again on every start.
 5. A tap on a card that shows text copies the text to the clipboard.
+6. Under the text the card reports how long the transcription took.
 
 whisper reads the audio in windows of 30 seconds, so the bar moves once per segment.
 A voice note shorter than one window shows little movement before it finishes.
@@ -49,7 +50,8 @@ The method has limits:
 
 ## What the app stores
 
-The app keeps one SQLite database with the notification log and the transcriptions.
+The app keeps one SQLite database with the notification log, the transcriptions and the
+time each transcription took.
 `Wipe stored data` in the menu deletes both tables. Audio files stay untouched.
 
 Both the database and the model live in the private folder of the app. Android deletes

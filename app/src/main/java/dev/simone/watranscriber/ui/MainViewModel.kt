@@ -29,6 +29,7 @@ data class AudioItem(
     val chat: String?,
     val sender: String?,
     val transcript: String?,
+    val tookMillis: Long?,
 )
 
 sealed interface ModelState {
@@ -98,6 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     chat = label?.first,
                     sender = label?.second,
                     transcript = row?.transcript,
+                    tookMillis = row?.tookMillis,
                 )
             }
         }
@@ -115,16 +117,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(progress = it.progress + (item.path to 0)) }
             try {
                 val model = WhisperModel.file(getApplication())
+                val startedAt = System.currentTimeMillis()
                 val samples = withContext(Dispatchers.IO) { AudioDecoder.decode(item.path) }
                 val text = Whisper.transcribe(model, samples) { percent ->
                     _state.update { it.copy(progress = it.progress + (item.path to percent)) }
                 }
-                withContext(Dispatchers.IO) { store.saveTranscript(item.path, text) }
+                val took = System.currentTimeMillis() - startedAt
+                withContext(Dispatchers.IO) { store.saveTranscript(item.path, text, took) }
                 _state.update { current ->
                     current.copy(
                         progress = current.progress - item.path,
                         items = current.items.map {
-                            if (it.path == item.path) it.copy(transcript = text) else it
+                            if (it.path == item.path) {
+                                it.copy(transcript = text, tookMillis = took)
+                            } else {
+                                it
+                            }
                         },
                     )
                 }

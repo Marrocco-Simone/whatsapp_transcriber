@@ -11,7 +11,7 @@ private const val VOICE_WINDOW_MS = 120_000L
 private const val ANY_WINDOW_MS = 25_000L
 
 class Store private constructor(context: Context) :
-    SQLiteOpenHelper(context, "watranscriber.db", null, 1) {
+    SQLiteOpenHelper(context, "watranscriber.db", null, 2) {
 
     companion object {
         @Volatile
@@ -30,11 +30,16 @@ class Store private constructor(context: Context) :
         db.execSQL("CREATE INDEX idx_notif_time ON notif (postedAt)")
         db.execSQL(
             "CREATE TABLE audio (" +
-                "path TEXT PRIMARY KEY, chat TEXT, sender TEXT, transcript TEXT)"
+                "path TEXT PRIMARY KEY, chat TEXT, sender TEXT, transcript TEXT, " +
+                "tookMillis INTEGER)"
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE audio ADD COLUMN tookMillis INTEGER")
+        }
+    }
 
     fun addNotification(postedAt: Long, chat: String, sender: String?, isVoice: Boolean) {
         val values = ContentValues().apply {
@@ -80,6 +85,7 @@ class Store private constructor(context: Context) :
                     chat = cursor.getStringOrNull("chat"),
                     sender = cursor.getStringOrNull("sender"),
                     transcript = cursor.getStringOrNull("transcript"),
+                    tookMillis = cursor.getLongOrNull("tookMillis"),
                 )
             }
         }
@@ -94,11 +100,12 @@ class Store private constructor(context: Context) :
         )
     }
 
-    fun saveTranscript(path: String, text: String) {
+    fun saveTranscript(path: String, text: String, tookMillis: Long) {
         writableDatabase.execSQL(
-            "INSERT INTO audio (path, transcript) VALUES (?, ?) " +
-                "ON CONFLICT(path) DO UPDATE SET transcript = excluded.transcript",
-            arrayOf(path, text),
+            "INSERT INTO audio (path, transcript, tookMillis) VALUES (?, ?, ?) " +
+                "ON CONFLICT(path) DO UPDATE SET transcript = excluded.transcript, " +
+                "tookMillis = excluded.tookMillis",
+            arrayOf(path, text, tookMillis),
         )
     }
 
@@ -109,9 +116,19 @@ class Store private constructor(context: Context) :
     }
 }
 
-data class AudioRow(val chat: String?, val sender: String?, val transcript: String?)
+data class AudioRow(
+    val chat: String?,
+    val sender: String?,
+    val transcript: String?,
+    val tookMillis: Long?,
+)
 
 private fun android.database.Cursor.getStringOrNull(column: String): String? {
     val index = getColumnIndexOrThrow(column)
     return if (isNull(index)) null else getString(index)
+}
+
+private fun android.database.Cursor.getLongOrNull(column: String): Long? {
+    val index = getColumnIndexOrThrow(column)
+    return if (isNull(index)) null else getLong(index)
 }
