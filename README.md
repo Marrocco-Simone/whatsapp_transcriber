@@ -75,10 +75,12 @@ Requirements: Android SDK with platform 35, NDK 27.1.12297006, CMake 3.22, JDK 1
 git clone --recurse-submodules <this repo>
 cd whatsapp_transcriber
 echo "sdk.dir=$ANDROID_HOME" > local.properties
-./gradlew :app:assembleDebug
+./build.sh
 ```
 
-The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
+`build.sh` reads `versionName` from `app/build.gradle.kts` and copies the APK to
+`builds/whatsapp-transcriber-v<version>.apk`. The `builds` folder is not in git. A build
+of the same version replaces the file.
 
 ## Continuous build
 
@@ -98,7 +100,7 @@ build shares.
 ## Install
 
 ```sh
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r builds/whatsapp-transcriber-v1.1.apk
 ```
 
 Then open the app and grant two permissions from its own cards:
