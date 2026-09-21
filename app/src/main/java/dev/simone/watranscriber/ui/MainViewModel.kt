@@ -45,8 +45,7 @@ data class UiState(
     val isScanning: Boolean = false,
     val items: List<AudioItem> = emptyList(),
     val totalFound: Int = 0,
-    val expandedPath: String? = null,
-    val transcribingPaths: Set<String> = emptySet(),
+    val progress: Map<String, Int> = emptyMap(),
     val error: String? = null,
 )
 
@@ -105,29 +104,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(items = items) }
     }
 
-    /** Opens the audio and transcribes it, unless a stored transcription is already there. */
     fun onCardClick(item: AudioItem) {
-        _state.update { it.copy(expandedPath = item.path, error = null) }
-        if (item.transcript == null && item.path !in _state.value.transcribingPaths) {
-            transcribe(item)
-        }
-    }
-
-    fun collapse() {
-        _state.update { it.copy(expandedPath = null) }
+        if (item.transcript != null || item.path in _state.value.progress) return
+        _state.update { it.copy(error = null) }
+        transcribe(item)
     }
 
     private fun transcribe(item: AudioItem) {
         viewModelScope.launch {
-            _state.update { it.copy(transcribingPaths = it.transcribingPaths + item.path) }
+            _state.update { it.copy(progress = it.progress + (item.path to 0)) }
             try {
                 val model = WhisperModel.file(getApplication())
                 val samples = withContext(Dispatchers.IO) { AudioDecoder.decode(item.path) }
-                val text = Whisper.transcribe(model, samples)
+                val text = Whisper.transcribe(model, samples) { percent ->
+                    _state.update { it.copy(progress = it.progress + (item.path to percent)) }
+                }
                 withContext(Dispatchers.IO) { store.saveTranscript(item.path, text) }
                 _state.update { current ->
                     current.copy(
-                        transcribingPaths = current.transcribingPaths - item.path,
+                        progress = current.progress - item.path,
                         items = current.items.map {
                             if (it.path == item.path) it.copy(transcript = text) else it
                         },
@@ -136,7 +131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Exception) {
                 _state.update {
                     it.copy(
-                        transcribingPaths = it.transcribingPaths - item.path,
+                        progress = it.progress - item.path,
                         error = error.message ?: "transcription failed",
                     )
                 }
@@ -165,14 +160,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             Whisper.release()
             withContext(Dispatchers.IO) { WhisperModel.delete(getApplication()) }
-            _state.update { it.copy(model = ModelState.Missing, expandedPath = null) }
+            _state.update { it.copy(model = ModelState.Missing) }
         }
     }
 
     fun wipeStoredData() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { store.wipe() }
-            _state.update { it.copy(expandedPath = null) }
             loadPage()
         }
     }

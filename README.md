@@ -10,9 +10,13 @@ The app is for personal use. It is not on any store. You install it with `adb`.
 1. It lists the newest WhatsApp audio files as cards. Each card shows the chat name,
    the sender, the message time and the duration.
 2. `Load more` adds 20 more cards.
-3. A tap on a card transcribes the audio and shows the text under the card.
-4. A second tap on the same card copies the text to the clipboard.
-5. `Hide` closes the text.
+3. A tap on a card without a transcription transcribes the audio. A progress bar
+   shows how far whisper is.
+4. The text then stays under the card, and the app shows it again on every start.
+5. A tap on a card that shows text copies the text to the clipboard.
+
+whisper reads the audio in windows of 30 seconds, so the bar moves once per segment.
+A voice note shorter than one window shows little movement before it finishes.
 
 ## How it reads the audio
 

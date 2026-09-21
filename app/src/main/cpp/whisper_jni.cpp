@@ -26,6 +26,40 @@ Java_dev_simone_watranscriber_whisper_Whisper_nativeFree(
     }
 }
 
+struct progress_state {
+    JNIEnv *env;
+    jobject listener;
+    jmethodID method;
+    int64_t total_cs;
+    int last_percent;
+};
+
+/**
+ * whisper calls this on the thread that called whisper_full, so the JNIEnv of that call
+ * stays valid. Segment times are in centiseconds.
+ */
+static void on_new_segment(struct whisper_context *, struct whisper_state *state,
+                           int, void *user_data) {
+    auto *progress = static_cast<progress_state *>(user_data);
+    const int n_segments = whisper_full_n_segments_from_state(state);
+    if (n_segments <= 0 || progress->total_cs <= 0) {
+        return;
+    }
+    const int64_t t1 = whisper_full_get_segment_t1_from_state(state, n_segments - 1);
+    int percent = static_cast<int>(100 * t1 / progress->total_cs);
+    if (percent > 100) {
+        percent = 100;
+    }
+    if (percent <= progress->last_percent) {
+        return;
+    }
+    progress->last_percent = percent;
+    progress->env->CallVoidMethod(progress->listener, progress->method, percent);
+    if (progress->env->ExceptionCheck()) {
+        progress->env->ExceptionClear();
+    }
+}
+
 static jbyteArray to_byte_array(JNIEnv *env, const std::string &text) {
     const auto size = static_cast<jsize>(text.size());
     jbyteArray array = env->NewByteArray(size);
@@ -41,7 +75,7 @@ static jbyteArray to_byte_array(JNIEnv *env, const std::string &text) {
  */
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_dev_simone_watranscriber_whisper_Whisper_nativeTranscribe(
-        JNIEnv *env, jobject, jlong handle, jfloatArray pcm,
+        JNIEnv *env, jobject thiz, jlong handle, jfloatArray pcm,
         jstring language, jint threads) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) {
@@ -65,11 +99,22 @@ Java_dev_simone_watranscriber_whisper_Whisper_nativeTranscribe(
     params.n_threads = threads;
     params.language = lang;
     params.translate = false;
-    params.no_timestamps = true;
     params.print_progress = false;
     params.print_realtime = false;
     params.print_special = false;
     params.print_timestamps = false;
+
+    progress_state progress {
+        env, thiz, env->GetMethodID(env->GetObjectClass(thiz), "onProgress", "(I)V"),
+        n_samples / (WHISPER_SAMPLE_RATE / 100), 0,
+    };
+    if (progress.method == nullptr) {
+        env->ExceptionClear();
+        LOGI("no progress method, reporting no progress");
+    } else {
+        params.new_segment_callback = on_new_segment;
+        params.new_segment_callback_user_data = &progress;
+    }
 
     std::string text;
     if (whisper_full(ctx, params, samples, n_samples) == 0) {

@@ -29,7 +29,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -178,18 +177,16 @@ fun MainScreen(
             items(state.items, key = { it.path }) { item ->
                 AudioCard(
                     item = item,
-                    isExpanded = state.expandedPath == item.path,
-                    isTranscribing = item.path in state.transcribingPaths,
+                    percent = state.progress[item.path],
                     onClick = {
                         val transcript = item.transcript
-                        if (state.expandedPath == item.path && transcript != null) {
+                        if (transcript.isNullOrBlank()) {
+                            viewModel.onCardClick(item)
+                        } else {
                             clipboard.setText(AnnotatedString(transcript))
                             scope.launch { snackbarHost.showSnackbar("Transcription copied") }
-                        } else {
-                            viewModel.onCardClick(item)
                         }
                     },
-                    onHide = viewModel::collapse,
                 )
             }
 
@@ -219,19 +216,13 @@ fun MainScreen(
 @Composable
 private fun AudioCard(
     item: AudioItem,
-    isExpanded: Boolean,
-    isTranscribing: Boolean,
+    percent: Int?,
     onClick: () -> Unit,
-    onHide: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
-            containerColor = if (isExpanded) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -256,43 +247,44 @@ private fun AudioCard(
                     item.sender,
                     item.durationMillis?.let(::formatDuration),
                     if (item.chat == null) item.name else null,
-                    if (item.transcript != null && !isExpanded) "transcribed" else null,
                 ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            if (isExpanded) {
+            if (percent != null) {
                 HorizontalDivider(Modifier.padding(vertical = 10.dp))
-                when {
-                    isTranscribing -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.size(10.dp))
-                        Text("Transcribing…", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    item.transcript.isNullOrBlank() -> Text(
-                        "No speech found.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    else -> Column {
-                        Text(item.transcript, style = MaterialTheme.typography.bodyLarge)
-                        Spacer(Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Tap the card to copy",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            TextButton(onClick = onHide) { Text("Hide") }
-                        }
-                    }
+                TranscribingBlock(percent)
+            } else if (item.transcript != null) {
+                HorizontalDivider(Modifier.padding(vertical = 10.dp))
+                if (item.transcript.isBlank()) {
+                    Text("No speech found.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text(item.transcript, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TranscribingBlock(percent: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.size(10.dp))
+        Text(
+            text = if (percent > 0) "Transcribing, $percent %" else "Transcribing",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    if (percent > 0) {
+        LinearProgressIndicator(
+            progress = { percent / 100f },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    } else {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
 }
 

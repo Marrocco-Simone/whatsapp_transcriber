@@ -21,16 +21,34 @@ object Whisper {
     private val mutex = Mutex()
     private var handle = 0L
 
+    @Volatile
+    private var listener: ((Int) -> Unit)? = null
+
     private val threads = minOf(4, Runtime.getRuntime().availableProcessors())
 
-    suspend fun transcribe(model: File, samples: FloatArray): String = mutex.withLock {
+    /** [onProgress] reports 0 to 100 as whisper finishes each segment of the audio. */
+    suspend fun transcribe(
+        model: File,
+        samples: FloatArray,
+        onProgress: (Int) -> Unit,
+    ): String = mutex.withLock {
         withContext(Dispatchers.Default) {
             if (handle == 0L) {
                 handle = nativeInit(model.absolutePath)
                 require(handle != 0L) { "whisper could not load ${model.name}" }
             }
-            String(nativeTranscribe(handle, samples, LANGUAGE_AUTO, threads)).trim()
+            listener = onProgress
+            try {
+                String(nativeTranscribe(handle, samples, LANGUAGE_AUTO, threads)).trim()
+            } finally {
+                listener = null
+            }
         }
+    }
+
+    // whisper_jni.cpp calls this by name while whisper_full runs.
+    private fun onProgress(percent: Int) {
+        listener?.invoke(percent)
     }
 
     suspend fun release() = mutex.withLock {
