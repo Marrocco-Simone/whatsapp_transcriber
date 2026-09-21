@@ -48,11 +48,18 @@ The method has limits:
 The app keeps one SQLite database with the notification log and the transcriptions.
 `Wipe stored data` in the menu deletes both tables. Audio files stay untouched.
 
+Both the database and the model live in the private folder of the app. Android deletes
+that folder when you uninstall the app. Cloud backup and device transfer are off, so
+neither file leaves the phone.
+
 ## The model
 
 The app downloads `ggml-large-v3-turbo-q5_0.bin` (about 550 MB) from Hugging Face on
 first use, into its private folder. The app loads the model into memory for a
 transcription and releases it when the screen stops.
+
+`Delete the model` in the menu frees that space. The next tap downloads the model again.
+This download is the only network request the app makes.
 
 ## Build
 
@@ -66,6 +73,16 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ```
 
 The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
+
+## Continuous build
+
+`.github/workflows/build-apk.yml` builds the debug APK on every push to `main`, on every
+pull request, and on demand from the Actions tab. It checks out whisper.cpp as a
+submodule, installs NDK 27.1.12297006 and CMake 3.22.1, runs `assembleDebug` and
+`lintDebug`, then uploads the APK as an artifact named `app-debug-<commit sha>`.
+
+To install a build from the phone, open the run in the Actions tab and download that
+artifact.
 
 ## Install
 

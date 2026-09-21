@@ -17,6 +17,8 @@ object WhisperModel {
 
     fun isReady(context: Context): Boolean = file(context).length() > 0
 
+    fun delete(context: Context): Boolean = file(context).delete()
+
     /** Downloads the model once. [onProgress] reports 0f to 1f, or -1f when the size is unknown. */
     suspend fun download(context: Context, onProgress: (Float) -> Unit) {
         withContext(Dispatchers.IO) {

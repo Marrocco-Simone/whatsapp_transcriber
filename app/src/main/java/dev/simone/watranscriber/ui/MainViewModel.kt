@@ -160,6 +160,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Frees the space the model takes. The next tap downloads it again. */
+    fun deleteModel() {
+        viewModelScope.launch {
+            Whisper.release()
+            withContext(Dispatchers.IO) { WhisperModel.delete(getApplication()) }
+            _state.update { it.copy(model = ModelState.Missing, expandedPath = null) }
+        }
+    }
+
     fun wipeStoredData() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { store.wipe() }

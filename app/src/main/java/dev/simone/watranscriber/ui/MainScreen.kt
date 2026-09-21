@@ -85,6 +85,20 @@ fun MainScreen(
                                 onOpenNotificationSettings()
                             },
                         )
+                        if (state.model is ModelState.Ready) {
+                            DropdownMenuItem(
+                                text = { Text("Delete the model") },
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.deleteModel()
+                                    scope.launch {
+                                        snackbarHost.showSnackbar(
+                                            "Model deleted. The next tap downloads it again."
+                                        )
+                                    }
+                                },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Wipe stored data") },
                             onClick = {
