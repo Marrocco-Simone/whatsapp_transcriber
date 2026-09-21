@@ -82,25 +82,18 @@ The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Continuous build
 
-`.github/workflows/build-apk.yml` builds the debug APK on every push to `main`, on every
-pull request, and on demand from the Actions tab. It checks out whisper.cpp as a
-submodule, installs NDK 27.1.12297006 and CMake 3.22.1, runs `assembleDebug` and
-`lintDebug`, then uploads the APK as an artifact named `app-debug-<commit sha>`.
+`.github/workflows/build-apk.yml.disabled` holds a workflow that builds the APK and
+publishes it as a release. It is off, and the `.disabled` suffix keeps GitHub from
+running it.
 
-It then publishes the APK as a release asset named `whatsapp-transcriber-v<version>.apk`.
-The tag is `v` and the `versionName` from `app/build.gradle.kts`. A push that keeps the
-same version replaces the asset on the existing release. A push that raises
-`versionName` starts a new release.
+A runner has no debug keystore, so it makes a new one on every run. Android compares
+the signing key before the version and refuses to install an APK over an app that
+carries a different key. So each build from a runner needed an uninstall first, and an
+uninstall deletes the transcriptions and the model. Builds from one machine all carry
+the same key and install over each other.
 
-Install it from the phone through the Releases page, which serves the `.apk` directly.
-The artifact in the Actions tab holds the same APK inside a zip.
-
-The workflow builds the same code with the same flags as a local build, so the app
-behaves the same. It differs in one way: a runner has no debug keystore, so it makes a
-new one for each run. Android refuses to install an APK over an app that carries a
-different signature. So a second APK from Actions needs an uninstall first, and an
-uninstall deletes the transcriptions and the model. A build from your own machine always
-carries the same key, and installs over the previous one.
+To turn the workflow on again, drop the `.disabled` suffix and add a keystore that every
+build shares.
 
 ## Install
 
