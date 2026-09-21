@@ -44,7 +44,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import dev.simone.watranscriber.data.Language
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,6 +75,21 @@ fun MainScreen(
                         Icon(Icons.Default.MoreVert, contentDescription = "Menu")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        Language.entries.forEach { language ->
+                            DropdownMenuItem(
+                                text = { Text(language.label) },
+                                leadingIcon = {
+                                    if (language == state.language) {
+                                        Icon(Icons.Default.Check, contentDescription = "Selected")
+                                    }
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.setLanguage(language)
+                                },
+                            )
+                        }
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("Rescan") },
                             onClick = {
@@ -164,6 +184,16 @@ fun MainScreen(
                 is ModelState.Ready -> Unit
             }
 
+            if (state.engine == EngineState.LOADING) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.size(10.dp))
+                        Text("Loading the model", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
             state.error?.let { message ->
                 item {
                     Text(
@@ -177,7 +207,7 @@ fun MainScreen(
             items(state.items, key = { it.path }) { item ->
                 AudioCard(
                     item = item,
-                    percent = state.progress[item.path],
+                    running = state.running[item.path],
                     onClick = {
                         val transcript = item.transcript
                         if (transcript.isNullOrBlank()) {
@@ -216,7 +246,7 @@ fun MainScreen(
 @Composable
 private fun AudioCard(
     item: AudioItem,
-    percent: Int?,
+    running: Running?,
     onClick: () -> Unit,
 ) {
     Card(
@@ -252,9 +282,9 @@ private fun AudioCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            if (percent != null) {
+            if (running != null) {
                 HorizontalDivider(Modifier.padding(vertical = 10.dp))
-                TranscribingBlock(percent)
+                TranscribingBlock(running)
             } else if (item.transcript != null) {
                 HorizontalDivider(Modifier.padding(vertical = 10.dp))
                 if (item.transcript.isBlank()) {
@@ -276,19 +306,29 @@ private fun AudioCard(
 }
 
 @Composable
-private fun TranscribingBlock(percent: Int) {
+private fun TranscribingBlock(running: Running) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(running.startedAt) {
+        while (true) {
+            delay(1000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val elapsed = formatElapsed(now - running.startedAt)
+    val label = if (running.percent > 0) {
+        "Transcribing, ${running.percent} %, $elapsed"
+    } else {
+        "Transcribing, $elapsed"
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
         Spacer(Modifier.size(10.dp))
-        Text(
-            text = if (percent > 0) "Transcribing, $percent %" else "Transcribing",
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
     }
     Spacer(Modifier.height(8.dp))
-    if (percent > 0) {
+    if (running.percent > 0) {
         LinearProgressIndicator(
-            progress = { percent / 100f },
+            progress = { running.percent / 100f },
             modifier = Modifier.fillMaxWidth(),
         )
     } else {

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <algorithm>
 #include <string>
 #include <android/log.h>
 #include "whisper.h"
@@ -60,6 +61,18 @@ static void on_new_segment(struct whisper_context *, struct whisper_state *state
     }
 }
 
+/**
+ * whisper encodes 30 s windows of 1500 positions of 20 ms. A window sized to the audio
+ * skips the padding, which is faster and keeps the model from inventing text for the
+ * silence. limit: 1.5x the audio length with a floor of 320, set from one 3 s note.
+ * A tighter window cuts words at the end.
+ */
+static int audio_ctx_for(jsize n_samples) {
+    const double seconds = static_cast<double>(n_samples) / WHISPER_SAMPLE_RATE;
+    const int positions = static_cast<int>(seconds * 50 * 1.5);
+    return std::min(1500, std::max(320, positions));
+}
+
 static jbyteArray to_byte_array(JNIEnv *env, const std::string &text) {
     const auto size = static_cast<jsize>(text.size());
     jbyteArray array = env->NewByteArray(size);
@@ -98,6 +111,7 @@ Java_dev_simone_watranscriber_whisper_Whisper_nativeTranscribe(
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads = threads;
     params.language = lang;
+    params.audio_ctx = audio_ctx_for(n_samples);
     params.translate = false;
     params.print_progress = false;
     params.print_realtime = false;

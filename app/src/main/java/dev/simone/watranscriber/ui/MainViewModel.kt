@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import dev.simone.watranscriber.audio.AudioDecoder
 import dev.simone.watranscriber.data.AudioFile
 import dev.simone.watranscriber.data.AudioScanner
+import dev.simone.watranscriber.data.Language
+import dev.simone.watranscriber.data.Settings
 import dev.simone.watranscriber.data.Store
 import dev.simone.watranscriber.data.isNotificationAccessGranted
 import dev.simone.watranscriber.whisper.Whisper
@@ -32,6 +34,10 @@ data class AudioItem(
     val tookMillis: Long?,
 )
 
+data class Running(val percent: Int, val startedAt: Long)
+
+enum class EngineState { UNLOADED, LOADING, LOADED }
+
 sealed interface ModelState {
     data object Missing : ModelState
     data class Downloading(val progress: Float) : ModelState
@@ -46,14 +52,17 @@ data class UiState(
     val isScanning: Boolean = false,
     val items: List<AudioItem> = emptyList(),
     val totalFound: Int = 0,
-    val progress: Map<String, Int> = emptyMap(),
+    val running: Map<String, Running> = emptyMap(),
+    val language: Language = Language.ITALIAN,
+    val engine: EngineState = EngineState.UNLOADED,
     val error: String? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val store = Store.get(application)
-    private val _state = MutableStateFlow(UiState())
+    private val settings = Settings(application)
+    private val _state = MutableStateFlow(UiState(language = settings.language))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var files = emptyList<AudioFile>()
@@ -67,6 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 hasNotificationAccess = isNotificationAccessGranted(getApplication()),
             )
         }
+        if (_state.value.model is ModelState.Ready) loadModel()
         if (!Environment.isExternalStorageManager()) return
         viewModelScope.launch {
             _state.update { it.copy(isScanning = true) }
@@ -107,26 +117,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onCardClick(item: AudioItem) {
-        if (item.transcript != null || item.path in _state.value.progress) return
+        if (item.transcript != null || item.path in _state.value.running) return
         _state.update { it.copy(error = null) }
         transcribe(item)
     }
 
     private fun transcribe(item: AudioItem) {
         viewModelScope.launch {
-            _state.update { it.copy(progress = it.progress + (item.path to 0)) }
+            val startedAt = System.currentTimeMillis()
+            _state.update { it.copy(running = it.running + (item.path to Running(0, startedAt))) }
             try {
                 val model = WhisperModel.file(getApplication())
-                val startedAt = System.currentTimeMillis()
                 val samples = withContext(Dispatchers.IO) { AudioDecoder.decode(item.path) }
-                val text = Whisper.transcribe(model, samples) { percent ->
-                    _state.update { it.copy(progress = it.progress + (item.path to percent)) }
+                val language = _state.value.language.code
+                val text = Whisper.transcribe(model, samples, language) { percent ->
+                    _state.update {
+                        it.copy(running = it.running + (item.path to Running(percent, startedAt)))
+                    }
                 }
                 val took = System.currentTimeMillis() - startedAt
                 withContext(Dispatchers.IO) { store.saveTranscript(item.path, text, took) }
                 _state.update { current ->
                     current.copy(
-                        progress = current.progress - item.path,
+                        running = current.running - item.path,
                         items = current.items.map {
                             if (it.path == item.path) {
                                 it.copy(transcript = text, tookMillis = took)
@@ -139,7 +152,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Exception) {
                 _state.update {
                     it.copy(
-                        progress = it.progress - item.path,
+                        running = it.running - item.path,
                         error = error.message ?: "transcription failed",
                     )
                 }
@@ -155,6 +168,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(model = ModelState.Downloading(progress)) }
                 }
                 _state.update { it.copy(model = ModelState.Ready) }
+                loadModel()
             } catch (error: Exception) {
                 _state.update {
                     it.copy(model = ModelState.Failed(error.message ?: "download failed"))
@@ -163,12 +177,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun loadModel() {
+        if (_state.value.engine != EngineState.UNLOADED) return
+        _state.update { it.copy(engine = EngineState.LOADING) }
+        viewModelScope.launch {
+            try {
+                Whisper.load(WhisperModel.file(getApplication()))
+                _state.update { it.copy(engine = EngineState.LOADED) }
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(engine = EngineState.UNLOADED, error = error.message ?: "model load failed")
+                }
+            }
+        }
+    }
+
+    fun setLanguage(language: Language) {
+        settings.language = language
+        _state.update { it.copy(language = language) }
+    }
+
     /** Frees the space the model takes. The next tap downloads it again. */
     fun deleteModel() {
         viewModelScope.launch {
             Whisper.release()
             withContext(Dispatchers.IO) { WhisperModel.delete(getApplication()) }
-            _state.update { it.copy(model = ModelState.Missing) }
+            _state.update { it.copy(model = ModelState.Missing, engine = EngineState.UNLOADED) }
         }
     }
 
@@ -180,6 +214,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun releaseModel() {
-        viewModelScope.launch { Whisper.release() }
+        viewModelScope.launch {
+            Whisper.release()
+            _state.update { it.copy(engine = EngineState.UNLOADED) }
+        }
     }
 }

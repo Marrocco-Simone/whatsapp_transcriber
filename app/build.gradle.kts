@@ -27,6 +27,7 @@ android {
                     "-DWHISPER_BUILD_SERVER=OFF",
                     "-DGGML_OPENMP=OFF",
                     "-DBUILD_SHARED_LIBS=OFF",
+                    "-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16",
                 )
             }
         }

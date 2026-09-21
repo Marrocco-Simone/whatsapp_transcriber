@@ -10,14 +10,14 @@ The app is for personal use. It is not on any store. You install it with `adb`.
 1. It lists the newest WhatsApp audio files as cards. Each card shows the chat name,
    the sender, the message time and the duration.
 2. `Load more` adds 20 more cards.
-3. A tap on a card without a transcription transcribes the audio. A progress bar
-   shows how far whisper is.
+3. A tap on a card without a transcription transcribes the audio. The card shows the
+   seconds elapsed and, once whisper finishes a segment, the percentage done.
 4. The text then stays under the card, and the app shows it again on every start.
 5. A tap on a card that shows text copies the text to the clipboard.
 6. Under the text the card reports how long the transcription took.
 
-whisper reads the audio in windows of 30 seconds, so the bar moves once per segment.
-A voice note shorter than one window shows little movement before it finishes.
+The menu sets the spoken language. Italian is the default. `Detect the language` costs
+a second encoder pass, and on a short note it often picks a wrong language.
 
 ## How it reads the audio
 
@@ -67,6 +67,21 @@ transcription and releases it when the screen stops.
 `Delete the model` in the menu frees that space. The next tap downloads the model again.
 This download is the only network request the app makes.
 
+The app reads the model into memory when the screen opens, and releases it when the
+screen stops, because it holds about 600 MB. A tap made while `Loading the model` shows
+waits for the load to finish.
+
+## Speed
+
+whisper encodes audio in windows of 30 seconds. For a 3 second note that is 27 seconds
+of padding, which costs time and makes the model invent text. The app sizes the window
+to the audio, at 1.5 times its length with a floor of 320 positions of 20 ms. On one
+3 second note this cut the encoder from 8.4 s to 0.9 s on a laptop CPU, and turned an
+Icelandic guess into the right Italian sentence.
+
+The native library is compiled for `armv8.2-a+dotprod+fp16`, so it needs a phone from
+about 2018 or later. It runs whisper on every core.
+
 ## Build
 
 Requirements: Android SDK with platform 35, NDK 27.1.12297006, CMake 3.22, JDK 17.
@@ -115,6 +130,6 @@ Then open the app and grant two permissions from its own cards:
 | `app/src/main/cpp/whisper_jni.cpp` | JNI bridge to whisper.cpp |
 | `app/src/main/java/.../whisper/` | Model download and the whisper context |
 | `app/src/main/java/.../audio/` | Opus decoding to mono 16 kHz float |
-| `app/src/main/java/.../data/` | File scan, SQLite store, notification listener |
+| `app/src/main/java/.../data/` | File scan, SQLite store, notification listener, settings |
 | `app/src/main/java/.../ui/` | Compose screen and view model |
 | `third_party/whisper.cpp` | whisper.cpp as a git submodule |
