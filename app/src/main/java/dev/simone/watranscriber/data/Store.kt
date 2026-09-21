@@ -60,18 +60,11 @@ class Store private constructor(context: Context) :
         windowMillis: Long,
         voiceOnly: Boolean,
     ): ChatLabel? {
-        val where = StringBuilder("ABS(postedAt - ?) <= ?")
-        if (voiceOnly) where.append(" AND isVoice = 1")
-        readableDatabase.query(
-            "notif",
-            arrayOf("chat", "sender"),
-            where.toString(),
-            arrayOf(fileTimeMillis.toString(), windowMillis.toString()),
-            null,
-            null,
-            "ABS(postedAt - $fileTimeMillis) ASC",
-            "1",
-        ).use { cursor ->
+        val distance = "ABS(postedAt - $fileTimeMillis)"
+        val voiceFilter = if (voiceOnly) " AND isVoice = 1" else ""
+        val sql = "SELECT chat, sender FROM notif WHERE $distance <= $windowMillis$voiceFilter " +
+            "ORDER BY $distance ASC LIMIT 1"
+        readableDatabase.rawQuery(sql, null).use { cursor ->
             if (!cursor.moveToFirst()) return null
             val sender = if (cursor.isNull(1)) null else cursor.getString(1)
             return ChatLabel(cursor.getString(0), sender)

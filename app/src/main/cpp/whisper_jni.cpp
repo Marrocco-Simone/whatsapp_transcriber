@@ -26,18 +26,40 @@ Java_dev_simone_watranscriber_whisper_Whisper_nativeFree(
     }
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+static jbyteArray to_byte_array(JNIEnv *env, const std::string &text) {
+    const auto size = static_cast<jsize>(text.size());
+    jbyteArray array = env->NewByteArray(size);
+    if (array != nullptr && size > 0) {
+        env->SetByteArrayRegion(array, 0, size, reinterpret_cast<const jbyte *>(text.data()));
+    }
+    return array;
+}
+
+/**
+ * Returns UTF-8 bytes rather than a jstring, because NewStringUTF takes modified UTF-8 and
+ * rejects the four byte sequences that whisper can emit.
+ */
+extern "C" JNIEXPORT jbyteArray JNICALL
 Java_dev_simone_watranscriber_whisper_Whisper_nativeTranscribe(
         JNIEnv *env, jobject, jlong handle, jfloatArray pcm,
         jstring language, jint threads) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) {
-        return env->NewStringUTF("");
+        return to_byte_array(env, "");
     }
 
     const jsize n_samples = env->GetArrayLength(pcm);
     jfloat *samples = env->GetFloatArrayElements(pcm, nullptr);
+    if (samples == nullptr) {
+        LOGI("could not read the samples");
+        return to_byte_array(env, "");
+    }
     const char *lang = env->GetStringUTFChars(language, nullptr);
+    if (lang == nullptr) {
+        env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT);
+        LOGI("could not read the language");
+        return to_byte_array(env, "");
+    }
 
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads = threads;
@@ -61,5 +83,5 @@ Java_dev_simone_watranscriber_whisper_Whisper_nativeTranscribe(
 
     env->ReleaseStringUTFChars(language, lang);
     env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT);
-    return env->NewStringUTF(text.c_str());
+    return to_byte_array(env, text);
 }

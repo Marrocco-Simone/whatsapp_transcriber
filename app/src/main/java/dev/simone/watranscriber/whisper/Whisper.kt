@@ -29,7 +29,7 @@ object Whisper {
                 handle = nativeInit(model.absolutePath)
                 require(handle != 0L) { "whisper could not load ${model.name}" }
             }
-            nativeTranscribe(handle, samples, LANGUAGE_AUTO, threads).trim()
+            String(nativeTranscribe(handle, samples, LANGUAGE_AUTO, threads)).trim()
         }
     }
 
@@ -46,6 +46,6 @@ object Whisper {
         samples: FloatArray,
         language: String,
         threads: Int,
-    ): String
+    ): ByteArray
     private external fun nativeFree(handle: Long)
 }

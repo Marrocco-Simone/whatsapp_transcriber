@@ -26,6 +26,10 @@ object WhisperModel {
             connection.connectTimeout = 30_000
             connection.readTimeout = 30_000
             try {
+                connection.connect()
+                require(connection.responseCode == HttpURLConnection.HTTP_OK) {
+                    "the server answered HTTP ${connection.responseCode}"
+                }
                 connection.inputStream.use { input ->
                     val total = connection.contentLengthLong
                     partial.outputStream().use { output ->

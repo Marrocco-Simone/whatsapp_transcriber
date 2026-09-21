@@ -32,8 +32,6 @@ object AudioDecoder {
         val inputFormat = extractor.getTrackFormat(trackIndex)
         val mime = requireNotNull(inputFormat.getString(MediaFormat.KEY_MIME))
         val codec = MediaCodec.createDecoderByType(mime)
-        codec.configure(inputFormat, null, null, 0)
-        codec.start()
 
         var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
@@ -44,6 +42,8 @@ object AudioDecoder {
         var outputDone = false
 
         try {
+            codec.configure(inputFormat, null, null, 0)
+            codec.start()
             while (!outputDone) {
                 if (!inputDone) {
                     val inputIndex = codec.dequeueInputBuffer(DEQUEUE_TIMEOUT_US)
@@ -88,7 +88,7 @@ object AudioDecoder {
                 }
             }
         } finally {
-            codec.stop()
+            runCatching { codec.stop() }
             codec.release()
             extractor.release()
         }
@@ -123,6 +123,24 @@ object AudioDecoder {
         }
     }
 
+    /**
+     * The Android opus decoder returns 48 kHz, so the mean of every three samples removes
+     * most of the content above 8 kHz that would otherwise alias into the speech band.
+     * limit: a box filter, not a windowed sinc. Replace it if the accuracy is not enough.
+     */
+    private fun decimate(samples: FloatArray, sampleRate: Int): FloatArray {
+        val factor = sampleRate / WHISPER_SAMPLE_RATE
+        val output = FloatArray(samples.size / factor)
+        for (index in output.indices) {
+            var sum = 0f
+            for (offset in 0 until factor) {
+                sum += samples[index * factor + offset]
+            }
+            output[index] = sum / factor
+        }
+        return output
+    }
+
     private inline fun downmix(frames: Int, channels: Int, sample: (Int) -> Float): FloatArray {
         val mono = FloatArray(frames)
         for (frame in 0 until frames) {
@@ -137,6 +155,7 @@ object AudioDecoder {
 
     private fun resample(samples: FloatArray, sampleRate: Int): FloatArray {
         if (sampleRate == WHISPER_SAMPLE_RATE || samples.isEmpty()) return samples
+        if (sampleRate % WHISPER_SAMPLE_RATE == 0) return decimate(samples, sampleRate)
         val ratio = sampleRate.toDouble() / WHISPER_SAMPLE_RATE
         val outputSize = (samples.size / ratio).toInt()
         val output = FloatArray(outputSize)

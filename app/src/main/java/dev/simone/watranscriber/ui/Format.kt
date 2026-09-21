@@ -6,17 +6,14 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val timeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
-private val dateFormat = DateTimeFormatter.ofPattern("d MMM", Locale.getDefault())
-
 fun formatMessageTime(millis: Long): String {
     val moment = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
     val today = LocalDate.now()
-    val time = moment.format(timeFormat)
+    val time = moment.format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault()))
     return when (moment.toLocalDate()) {
         today -> time
         today.minusDays(1) -> "yesterday $time"
-        else -> "${moment.format(dateFormat)} $time"
+        else -> "${moment.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))} $time"
     }
 }
 

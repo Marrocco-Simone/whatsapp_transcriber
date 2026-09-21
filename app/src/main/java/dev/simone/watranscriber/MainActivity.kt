@@ -2,6 +2,7 @@ package dev.simone.watranscriber
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -9,8 +10,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.platform.LocalContext
 import dev.simone.watranscriber.ui.MainScreen
@@ -26,10 +29,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val dark = isSystemInDarkTheme()
-            val colors = if (dark) {
-                dynamicDarkColorScheme(context)
-            } else {
-                dynamicLightColorScheme(context)
+            val colors = when {
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.S ->
+                    if (dark) darkColorScheme() else lightColorScheme()
+                dark -> dynamicDarkColorScheme(context)
+                else -> dynamicLightColorScheme(context)
             }
             MaterialTheme(colorScheme = colors) {
                 MainScreen(
