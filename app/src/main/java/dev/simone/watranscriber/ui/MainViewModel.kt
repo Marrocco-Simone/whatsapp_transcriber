@@ -8,10 +8,12 @@ import dev.simone.watranscriber.audio.AudioDecoder
 import dev.simone.watranscriber.data.AudioFile
 import dev.simone.watranscriber.data.AudioScanner
 import dev.simone.watranscriber.data.Language
+import dev.simone.watranscriber.data.Model
 import dev.simone.watranscriber.data.Settings
 import dev.simone.watranscriber.data.Store
 import dev.simone.watranscriber.data.isNotificationAccessGranted
 import dev.simone.watranscriber.whisper.Whisper
+import dev.simone.watranscriber.whisper.Whistle
 import dev.simone.watranscriber.whisper.WhisperModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +56,7 @@ data class UiState(
     val totalFound: Int = 0,
     val running: Map<String, Running> = emptyMap(),
     val language: Language = Language.ITALIAN,
+    val selectedModel: Model = Model.TURBO,
     val engine: EngineState = EngineState.UNLOADED,
     val error: String? = null,
 )
@@ -62,7 +65,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val store = Store.get(application)
     private val settings = Settings(application)
-    private val _state = MutableStateFlow(UiState(language = settings.language))
+    private val _state = MutableStateFlow(
+        UiState(language = settings.language, selectedModel = settings.model)
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var files = emptyList<AudioFile>()
@@ -71,7 +76,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refresh() {
         _state.update {
             it.copy(
-                model = if (WhisperModel.isReady(getApplication())) ModelState.Ready else it.model,
+                model = if (WhisperModel.isReady(getApplication(), it.selectedModel)) {
+                    ModelState.Ready
+                } else {
+                    it.model
+                },
                 hasStorageAccess = Environment.isExternalStorageManager(),
                 hasNotificationAccess = isNotificationAccessGranted(getApplication()),
             )
@@ -127,13 +136,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val startedAt = System.currentTimeMillis()
             _state.update { it.copy(running = it.running + (item.path to Running(0, startedAt))) }
             try {
-                val model = WhisperModel.file(getApplication())
+                val selected = _state.value.selectedModel
+                val model = WhisperModel.file(getApplication(), selected)
                 val samples = withContext(Dispatchers.IO) { AudioDecoder.decode(item.path) }
-                val language = _state.value.language.code
-                val text = Whisper.transcribe(model, samples, language) { percent ->
+                val language = _state.value.language
+                val onProgress = { percent: Int ->
                     _state.update {
                         it.copy(running = it.running + (item.path to Running(percent, startedAt)))
                     }
+                }
+                val text = if (selected == Model.WHISTLE) {
+                    val code = language.code.takeIf { language != Language.AUTO }
+                    Whistle.transcribe(model, samples, code, onProgress)
+                } else {
+                    Whisper.transcribe(model, samples, language.code, onProgress)
                 }
                 val took = System.currentTimeMillis() - startedAt
                 withContext(Dispatchers.IO) { store.saveTranscript(item.path, text, took) }
@@ -164,7 +180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _state.update { it.copy(model = ModelState.Downloading(0f)) }
             try {
-                WhisperModel.download(getApplication()) { progress ->
+                WhisperModel.download(getApplication(), _state.value.selectedModel) { progress ->
                     _state.update { it.copy(model = ModelState.Downloading(progress)) }
                 }
                 _state.update { it.copy(model = ModelState.Ready) }
@@ -182,8 +198,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(engine = EngineState.LOADING) }
         viewModelScope.launch {
             try {
-                Whisper.load(WhisperModel.file(getApplication()))
-                _state.update { it.copy(engine = EngineState.LOADED) }
+                val selected = _state.value.selectedModel
+                val model = WhisperModel.file(getApplication(), selected)
+                if (selected == Model.WHISTLE) Whistle.load(model) else Whisper.load(model)
+                _state.update {
+                    if (it.engine == EngineState.LOADING) it.copy(engine = EngineState.LOADED) else it
+                }
             } catch (error: Exception) {
                 _state.update {
                     it.copy(engine = EngineState.UNLOADED, error = error.message ?: "model load failed")
@@ -197,11 +217,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(language = language) }
     }
 
+    /** Switches to [model] and deletes the file of the model used before. */
+    fun setModel(model: Model) {
+        val current = _state.value
+        if (model == current.selectedModel || current.model is ModelState.Downloading) return
+        settings.model = model
+        _state.update { it.copy(selectedModel = model, model = ModelState.Missing) }
+        viewModelScope.launch {
+            Whisper.release()
+            _state.update { it.copy(engine = EngineState.UNLOADED) }
+            withContext(Dispatchers.IO) { WhisperModel.deleteOthers(getApplication(), model) }
+            if (_state.value.selectedModel != model) return@launch
+            if (WhisperModel.isReady(getApplication(), model)) {
+                _state.update { it.copy(model = ModelState.Ready) }
+                loadModel()
+            }
+        }
+    }
+
     /** Frees the space the model takes. The next tap downloads it again. */
     fun deleteModel() {
         viewModelScope.launch {
             Whisper.release()
-            withContext(Dispatchers.IO) { WhisperModel.delete(getApplication()) }
+            withContext(Dispatchers.IO) {
+                WhisperModel.delete(getApplication(), _state.value.selectedModel)
+            }
             _state.update { it.copy(model = ModelState.Missing, engine = EngineState.UNLOADED) }
         }
     }

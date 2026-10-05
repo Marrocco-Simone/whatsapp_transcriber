@@ -1,7 +1,7 @@
 # WhatsApp Transcriber
 
-An Android app that transcribes WhatsApp voice notes on the phone. It runs whisper
-large-v3-turbo locally. It sends no audio and no text to a server.
+An Android app that transcribes WhatsApp voice notes on the phone. It runs a whisper
+or Whistle model locally. It sends no audio and no text to a server.
 
 The app is for personal use. It is not on any store. You install it with `adb`.
 
@@ -11,13 +11,14 @@ The app is for personal use. It is not on any store. You install it with `adb`.
    the sender, the message time and the duration.
 2. `Load more` adds 20 more cards.
 3. A tap on a card without a transcription transcribes the audio. The card shows the
-   seconds elapsed and, once whisper finishes a segment, the percentage done.
+   seconds elapsed and, once the model finishes a segment, the percentage done.
 4. The text then stays under the card, and the app shows it again on every start.
 5. A tap on a card that shows text copies the text to the clipboard.
 6. Under the text the card reports how long the transcription took.
 
-The menu sets the spoken language. Italian is the default. `Detect the language` costs
-a second encoder pass, and on a short note it often picks a wrong language.
+The menu sets the spoken language and the model. Italian is the default. With whisper,
+`Detect the language` costs a second encoder pass, and on a short note it often picks a
+wrong language.
 
 ## How it reads the audio
 
@@ -60,16 +61,42 @@ neither file leaves the phone.
 
 ## The model
 
-The app downloads `ggml-large-v3-turbo-q5_0.bin` (about 550 MB) from Hugging Face on
-first use, into its private folder. The app loads the model into memory for a
-transcription and releases it when the screen stops.
+The menu offers two models:
+
+| Model | Engine | File | Size |
+| --- | --- | --- | --- |
+| large-v3-turbo (default) | whisper.cpp | `ggml-large-v3-turbo-q5_0.bin` | 570 MB |
+| Whistle | needle | `whistle.cact` | 17 MB |
+
+Whistle transcribes much faster and keeps the phone cool, but makes more errors.
+
+Whistle is a speech model from Cactus Compute. It runs on the CPU in the needle engine.
+Of the app's languages it reads Italian and English, and `Detect the language` lets it
+pick between its own seven languages. It reads at most 30 s of audio per pass. The app
+cuts a longer note into windows of at most 30 s, and ends each window at the quietest
+100 ms of its last 5 s, so a cut rarely splits a word.
+
+One benchmark on a Mac (M4 Pro, CPU only, Italian) compares the models on the 10 longest
+notes, 48 minutes of audio. large-v3 gives the reference text, so the word error rate (WER)
+is the distance from large-v3, not from a human transcript.
+
+| Model | WER vs large-v3 | CPU seconds per minute of audio |
+| --- | --- | --- |
+| large-v3-turbo q5_0 | 13.3 % | 106 |
+| base q5_1 (not in the app) | 45.2 % | 17 |
+| Whistle | 38.9 % | 1.5 |
+
+The app downloads the selected model from Hugging Face into its private folder. A switch
+to another model deletes the file of the previous model, so only one model takes space.
+The download card then offers the new model.
 
 `Delete the model` in the menu frees that space. The next tap downloads the model again.
 This download is the only network request the app makes.
 
-The app reads the model into memory when the screen opens, and releases it when the
-screen stops, because it holds about 600 MB. A tap made while `Loading the model` shows
-waits for the load to finish.
+The app reads the model into memory when the screen opens. It releases large-v3-turbo
+when the screen stops, because that model holds about 600 MB. The needle engine has no
+call that frees a model, so Whistle stays in memory until Android stops the app. A tap
+made while `Loading the model` shows waits for the load to finish.
 
 ## Speed
 
@@ -80,7 +107,7 @@ to the audio, at 1.5 times its length with a floor of 320 positions of 20 ms. On
 Icelandic guess into the right Italian sentence.
 
 The native library is compiled for `armv8.2-a+dotprod+fp16`, so it needs a phone from
-about 2018 or later. It runs whisper on every core.
+about 2018 or later. It runs whisper on every core. The needle engine picks its own threads.
 
 ## Build
 
@@ -92,6 +119,19 @@ cd whatsapp_transcriber
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./build.sh
 ```
+
+`third_party/needle` holds the needle engine as a prebuilt static library, `libneedle.a`
+and `needle.h` from the `android-arm64` folder of
+[Cactus-Compute/needle3](https://huggingface.co/Cactus-Compute/needle3) at revision
+`2ae11323dc000f5e70c49f7403efa6af12ba9e67`, under the Apache-2.0 license. The app
+downloads `whistle.cact` from
+[Cactus-Compute/whistle](https://huggingface.co/Cactus-Compute/whistle) at revision
+`b358ddadd89b7a713b5aa131f23032d3cca1b251`.
+
+Before the Gradle build, `build.sh` lists the functions that `libneedle.a` imports, with
+`llvm-nm` from the NDK. It stops the build when the library imports a network, process or
+dynamic loading function, such as `socket`, `connect`, `getaddrinfo`, `dlopen` or `fork`.
+So the engine cannot send telemetry or other data.
 
 `build.sh` reads `versionName` from `app/build.gradle.kts` and copies the APK to
 `builds/whatsapp-transcriber-v<version>.apk`. The `builds` folder is not in git. A build
@@ -115,7 +155,7 @@ build shares.
 ## Install
 
 ```sh
-adb install -r builds/whatsapp-transcriber-v1.1.apk
+adb install -r builds/whatsapp-transcriber-v1.2.apk
 ```
 
 Then open the app and grant two permissions from its own cards:
@@ -128,8 +168,10 @@ Then open the app and grant two permissions from its own cards:
 | Path | Contents |
 | --- | --- |
 | `app/src/main/cpp/whisper_jni.cpp` | JNI bridge to whisper.cpp |
-| `app/src/main/java/.../whisper/` | Model download and the whisper context |
+| `app/src/main/cpp/needle_jni.cpp` | JNI bridge to the needle engine |
+| `app/src/main/java/.../whisper/` | Model download, the whisper context and Whistle |
 | `app/src/main/java/.../audio/` | Opus decoding to mono 16 kHz float |
 | `app/src/main/java/.../data/` | File scan, SQLite store, notification listener, settings |
 | `app/src/main/java/.../ui/` | Compose screen and view model |
 | `third_party/whisper.cpp` | whisper.cpp as a git submodule |
+| `third_party/needle` | Prebuilt needle engine for arm64 Android, with its license |

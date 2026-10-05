@@ -7,8 +7,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Holds one whisper.cpp context. The model needs about 600 MB of memory, so the context is
- * released as soon as the screen stops.
+ * Holds one whisper.cpp context. large-v3-turbo needs about 600 MB of memory, so the context
+ * is released as soon as the screen stops.
  */
 object Whisper {
 

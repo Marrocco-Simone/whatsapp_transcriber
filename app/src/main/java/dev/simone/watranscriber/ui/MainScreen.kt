@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableLongStateOf
 import dev.simone.watranscriber.data.Language
+import dev.simone.watranscriber.data.Model
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -86,6 +87,22 @@ fun MainScreen(
                                 onClick = {
                                     menuOpen = false
                                     viewModel.setLanguage(language)
+                                },
+                            )
+                        }
+                        HorizontalDivider()
+                        Model.entries.forEach { model ->
+                            DropdownMenuItem(
+                                text = { Text("${model.label}, ${model.size}") },
+                                leadingIcon = {
+                                    if (model == state.selectedModel) {
+                                        Icon(Icons.Default.Check, contentDescription = "Selected")
+                                    }
+                                },
+                                enabled = state.model !is ModelState.Downloading,
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.setModel(model)
                                 },
                             )
                         }
@@ -166,8 +183,9 @@ fun MainScreen(
             when (val model = state.model) {
                 is ModelState.Missing -> item {
                     SetupCard(
-                        title = "Download the whisper model",
-                        body = "large-v3-turbo, about 550 MB. This happens once.",
+                        title = "Download the model",
+                        body = "${state.selectedModel.label}, about ${state.selectedModel.size}. " +
+                            "This happens once.",
                         action = "Download",
                         onAction = viewModel::downloadModel,
                     )
