@@ -163,6 +163,43 @@ Then open the app and grant two permissions from its own cards:
 1. All files access, for the audio.
 2. Notification access, for the chat names.
 
+## Desktop script
+
+`scripts/whisper` transcribes an audio file on macOS or Linux with `whisper-cli` and
+copies the text to the clipboard. With `--whatsapp` it takes the newest WhatsApp audio in
+`~/Downloads`. With `--batch` it prints the text of all WhatsApp audio from one day, without
+the clipboard. `whisper -h` lists the options.
+
+It needs `whisper-cli`, `ffmpeg` and `curl`. For the clipboard it uses `pbcopy` on macOS, and
+`wl-copy` or `xclip` on Linux. Without a display, for example over SSH, it only prints
+the text. On the first run of a model it downloads the model to `~/.cache/whisper`.
+
+On macOS:
+
+```sh
+brew install whisper-cpp ffmpeg
+mkdir -p ~/.local/bin
+ln -s "$PWD/scripts/whisper" ~/.local/bin/whisper
+```
+
+On Debian, Ubuntu or Linux Mint, build `whisper-cli` from the submodule:
+
+```sh
+sudo apt install build-essential cmake ffmpeg curl xclip
+cmake -S third_party/whisper.cpp -B build/whisper.cpp -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+cmake --build build/whisper.cpp -j --target whisper-cli
+mkdir -p ~/.local/bin
+ln -s "$PWD/build/whisper.cpp/bin/whisper-cli" ~/.local/bin/whisper-cli
+ln -s "$PWD/scripts/whisper" ~/.local/bin/whisper
+```
+
+For an NVIDIA GPU, install `nvidia-cuda-toolkit` and `g++-12`, and add
+`-DGGML_CUDA=1 -DCMAKE_CUDA_HOST_COMPILER=g++-12` to the first `cmake` command. The CUDA 12.0
+of Ubuntu 24.04 does not accept its default gcc 13.
+
+`WHISPER_MODEL` sets the default model, for example `large-v3-turbo-q5_0` (570 MB) on a
+GPU with 2 GB of memory. `WHISPER_LANG` sets the default language.
+
 ## Layout
 
 | Path | Contents |
@@ -173,5 +210,6 @@ Then open the app and grant two permissions from its own cards:
 | `app/src/main/java/.../audio/` | Opus decoding to mono 16 kHz float |
 | `app/src/main/java/.../data/` | File scan, SQLite store, notification listener, settings |
 | `app/src/main/java/.../ui/` | Compose screen and view model |
+| `scripts/whisper` | Desktop transcription script for macOS and Linux |
 | `third_party/whisper.cpp` | whisper.cpp as a git submodule |
 | `third_party/needle` | Prebuilt needle engine for arm64 Android, with its license |

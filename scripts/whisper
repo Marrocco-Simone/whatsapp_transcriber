@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# Transcribe an audio/video file with whisper.cpp and copy the text to the clipboard.
+set -euo pipefail
+
+MODEL_DIR="$HOME/.cache/whisper"
+MODEL_NAME="${WHISPER_MODEL:-large-v3-turbo}"
+SPOKEN_LANG="${WHISPER_LANG:-auto}"
+KEEP_LINES=0
+SAVE_TXT=0
+QUIET=0
+PICK_LATEST=0
+BATCH=0
+BATCH_DATE=""
+DOWNLOADS="$HOME/Downloads"
+
+usage() {
+  cat <<'EOF'
+usage: whisper [options] <audio-file>
+       whisper [options] --whatsapp
+       whisper [options] --batch [YYYYMMDD]
+
+Transcribes the file and copies the transcript to the clipboard
+(pbcopy on macOS, wl-copy or xclip on Linux, skipped without a display).
+
+options:
+  -w, --whatsapp, --latest
+             use the newest WhatsApp audio in ~/Downloads instead of a file
+  --batch [YYYYMMDD]
+             transcribe every WhatsApp audio in ~/Downloads from the given
+             day (default: today), printing each transcript to stdout
+  -l LANG    spoken language (default: auto) e.g. it, en
+  -m MODEL   model name (default: large-v3-turbo)
+             e.g. large-v3, large-v3-turbo, medium, small, base
+  -o         also save the transcript as <audio-file>.txt
+  --lines    keep whisper's segment line breaks (default: one paragraph)
+  -q         only output the transcript, no status messages
+  -h         show this help
+
+env: WHISPER_MODEL, WHISPER_LANG
+models are cached in ~/.cache/whisper
+EOF
+}
+
+log() { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*" >&2; }
+
+latest_whatsapp_audio() {
+  local f newest=""
+  shopt -s nullglob nocaseglob
+  for f in "$DOWNLOADS"/"WhatsApp Audio"* "$DOWNLOADS"/"WhatsApp Ptt"*; do
+    if [ -f "$f" ] && { [ -z "$newest" ] || [ "$f" -nt "$newest" ]; }; then
+      newest="$f"
+    fi
+  done
+  shopt -u nullglob nocaseglob
+  printf '%s' "$newest"
+}
+
+copy_to_clipboard() {
+  if command -v pbcopy >/dev/null; then
+    LC_ALL=en_US.UTF-8 pbcopy
+  elif [ -n "${WAYLAND_DISPLAY:-}" ] && command -v wl-copy >/dev/null; then
+    wl-copy
+  elif [ -n "${DISPLAY:-}" ] && command -v xclip >/dev/null; then
+    xclip -selection clipboard >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+cpu_threads() {
+  sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.logicalcpu
+}
+
+# Matches the date in the filename ("WhatsApp Audio 2026-09-08 at 15.04.33.opus")
+# and sorts by name, which is chronological for this fixed format.
+whatsapp_audios_on_day() {
+  local day="$1"
+  local dashed="${day:0:4}-${day:4:2}-${day:6:2}"
+  find "$DOWNLOADS" -maxdepth 1 -type f \
+    \( -iname "WhatsApp Audio $dashed at *" -o -iname "WhatsApp Ptt $dashed at *" \) -print0 2>/dev/null |
+    sort -z
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -w|--whatsapp|--latest) PICK_LATEST=1; shift ;;
+    --batch)
+      BATCH=1
+      if [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]{8}$ ]]; then
+        BATCH_DATE="$2"; shift 2
+      else
+        BATCH_DATE="$(date +%Y%m%d)"; shift
+      fi
+      ;;
+    -l) SPOKEN_LANG="$2"; shift 2 ;;
+    -m) MODEL_NAME="$2"; shift 2 ;;
+    -o) SAVE_TXT=1; shift ;;
+    --lines) KEEP_LINES=1; shift ;;
+    -q) QUIET=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
+    *) break ;;
+  esac
+done
+
+for cmd in whisper-cli ffmpeg; do
+  command -v "$cmd" >/dev/null || { echo "missing dependency: $cmd" >&2; exit 1; }
+done
+
+MODEL_PATH="$MODEL_DIR/ggml-$MODEL_NAME.bin"
+if [ ! -f "$MODEL_PATH" ]; then
+  mkdir -p "$MODEL_DIR"
+  URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$MODEL_NAME.bin"
+  log "model $MODEL_NAME not cached, downloading once to $MODEL_PATH ..."
+  curl -fL --progress-bar "$URL" -o "$MODEL_PATH.part" || {
+    rm -f "$MODEL_PATH.part"
+    echo "download failed: $URL" >&2
+    exit 1
+  }
+  mv "$MODEL_PATH.part" "$MODEL_PATH"
+fi
+
+# Transcribes $1 and writes the cleaned transcript to file $2.
+transcribe() {
+  local input="$1" out="$2" work
+  # BSD sed and tr abort on invalid UTF-8, and whisper can cut a segment inside a character
+  local -x LC_ALL=C
+  work="$(mktemp -d)"
+
+  log "converting audio ..."
+  ffmpeg -nostdin -loglevel error -i "$input" -ar 16000 -ac 1 -c:a pcm_s16le "$work/audio.wav"
+
+  log "transcribing with $MODEL_NAME (lang: $SPOKEN_LANG) ..."
+  whisper-cli -m "$MODEL_PATH" -f "$work/audio.wav" -l "$SPOKEN_LANG" -mc 0 -np \
+    -t "$(cpu_threads)" \
+    >"$work/raw.txt" 2>"$work/err.txt" || {
+      cat "$work/err.txt" >&2
+      rm -rf "$work"
+      return 1
+    }
+
+  # decode with timestamps (they anchor the decoder), then strip them from the output
+  sed -E 's/^\[[0-9:.]+ --> [0-9:.]+\][[:space:]]*//' "$work/raw.txt" >"$work/decoded.txt"
+
+  if [ "$KEEP_LINES" -eq 1 ]; then
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$work/decoded.txt" | sed '/^$/d' >"$out"
+  else
+    tr '\n' ' ' <"$work/decoded.txt" | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//' >"$out"
+    printf '\n' >>"$out"
+  fi
+
+  rm -rf "$work"
+}
+
+if [ "$BATCH" -eq 1 ]; then
+  if [ "$PICK_LATEST" -eq 1 ] || [ $# -ne 0 ]; then
+    echo "--batch takes no file argument" >&2
+    exit 1
+  fi
+  FILES=()
+  while IFS= read -r -d '' f; do FILES+=("$f"); done \
+    < <(whatsapp_audios_on_day "$BATCH_DATE")
+  if [ "${#FILES[@]}" -eq 0 ]; then
+    echo "no WhatsApp audio from $BATCH_DATE found in $DOWNLOADS" >&2
+    exit 1
+  fi
+
+  OUT="$(mktemp)"
+  trap 'rm -f "$OUT"' EXIT
+  log "transcribing ${#FILES[@]} audio(s) from $BATCH_DATE ..."
+  for INPUT in "${FILES[@]}"; do
+    log "--- $(basename "$INPUT") ---"
+    transcribe "$INPUT" "$OUT"
+    printf '## %s\n' "$(basename "$INPUT")"
+    cat "$OUT"
+    printf '\n'
+    if [ "$SAVE_TXT" -eq 1 ]; then
+      cp "$OUT" "$INPUT.txt"
+      log "saved to $INPUT.txt"
+    fi
+  done
+  exit 0
+fi
+
+if [ "$PICK_LATEST" -eq 1 ]; then
+  if [ $# -ne 0 ]; then
+    echo "--whatsapp takes no file argument" >&2
+    exit 1
+  fi
+  INPUT="$(latest_whatsapp_audio)"
+  if [ -z "$INPUT" ]; then
+    echo "no WhatsApp audio found in $DOWNLOADS" >&2
+    exit 1
+  fi
+  log "using $(basename "$INPUT")"
+else
+  if [ $# -ne 1 ]; then
+    usage >&2
+    exit 1
+  fi
+  INPUT="$1"
+fi
+
+if [ ! -f "$INPUT" ]; then
+  echo "file not found: $INPUT" >&2
+  exit 1
+fi
+
+OUT="$(mktemp)"
+trap 'rm -f "$OUT"' EXIT
+transcribe "$INPUT" "$OUT"
+
+if [ ! -s "$OUT" ]; then
+  echo "no speech detected" >&2
+  exit 1
+fi
+
+if [ "$SAVE_TXT" -eq 1 ]; then
+  cp "$OUT" "$INPUT.txt"
+  log "saved to $INPUT.txt"
+fi
+
+cat "$OUT"
+if copy_to_clipboard <"$OUT"; then
+  log "--- copied to clipboard ---"
+else
+  log "--- no clipboard available ---"
+fi
